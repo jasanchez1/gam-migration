@@ -6,9 +6,10 @@
   "main": "gamZerkelMapper.js",
   "scripts": {
     "demo": "node gamZerkelMapper.js",
-    "test": "node --test",
+    "test": "node --test gamZerkelMapper.test.js normalizeTargeting.test.js",
     "fetch-maps": "node fetchTargetingMaps.js",
-    "export": "node exportData.js"
+    "export": "node exportData.js",
+    "test:normalize": "node --test normalizeTargeting.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

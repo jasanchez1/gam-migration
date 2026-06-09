@@ -49,6 +49,8 @@ Output:
 |---|---|
 | `gamZerkelMapper.js` | The mapper module + a runnable demo |
 | `gamZerkelMapper.test.js` | Unit tests (`node:test`, no dependencies) |
+| `normalizeTargeting.js` | Renames `@_type` → `xsi_type` on exported GAM nodes so they can be fed into `gamZerkelMapper.js` |
+| `normalizeTargeting.test.js` | Unit tests for `normalizeTargeting.js` |
 | `gamClient.js` | Shared GAM SOAP plumbing (auth, `soapCall`, paging) reused by the scripts below |
 | `fetchTargetingMaps.js` | Fetches GAM key/value name↔id maps via the GAM API |
 | `exportData.js` | Full raw export of core GAM entities for migration |
@@ -150,6 +152,30 @@ Notes:
   run continues to the next. Large networks (thousands of creatives/line items)
   can take several minutes; paging is sequential to stay within GAM's QPS limits.
 
+## Bridging the export to the mapper
+
+`exportData.js` and `gamZerkelMapper.js` cannot be wired together directly.
+The exporter uses `fast-xml-parser` with `attributeNamePrefix: '@_'`, so
+polymorphic GAM objects (e.g. `CustomCriteriaSet`) carry their type
+discriminator as `@_type`. The mapper expects `xsi_type`.
+
+`normalizeTargeting.js` bridges this with a single recursive rename:
+
+```js
+const { normalizeTargeting } = require('./normalizeTargeting');
+const { translateCustomTargeting } = require('./gamZerkelMapper');
+const { keys, values } = require('./targetingMaps.json');
+
+const rawNode = lineItem.targeting.customTargeting;
+const zerkel = translateCustomTargeting(normalizeTargeting(rawNode), keys, values);
+```
+
+**Assumption:** the only `@_type` values within `customTargeting` are
+`CustomCriteriaSet` and `CustomCriteria`. If other types appear (e.g.
+`AudienceSegmentCriteria`), the mapper will throw `Unrecognized xsi_type: ...`.
+This has not been verified against a real Booking.com export — treat any such
+throw as a signal to extend the mapper rather than the normalizer.
+
 ## API
 
 ```js
@@ -224,6 +250,9 @@ Beyond boolean logic (which maps cleanly), watch for:
 4. **Non-KV GAM targeting** — audience segments, CMS metadata, etc. are **not**
    plain key-values and are out of scope; they map to Kevel only if an
    equivalent request property / UserDB segment / reserved key exists.
+5. **Export → mapper gap** — exported `lineItems.json` uses `@_type` as the
+   discriminator, not `xsi_type`. Always pass `customTargeting` nodes through
+   `normalizeTargeting()` before calling `translateCustomTargeting()`.
 
 ## Usage
 
@@ -232,6 +261,7 @@ npm install          # install deps (needed for fetchTargetingMaps.js)
 
 node gamZerkelMapper.js   # run the built-in mapper demo
 node --test               # run the test suite (Node 18+)
+node --test normalizeTargeting.test.js   # run normalize tests
 npm run fetch-maps        # fetch key/value maps from GAM (needs .env)
 npm run export            # full raw entity export to export/ (needs .env)
 ```
