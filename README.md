@@ -51,6 +51,9 @@ Output:
 | `gamZerkelMapper.test.js` | Unit tests (`node:test`, no dependencies) |
 | `normalizeTargeting.js` | Renames `@_type` → `xsi_type` on exported GAM nodes so they can be fed into `gamZerkelMapper.js` |
 | `normalizeTargeting.test.js` | Unit tests for `normalizeTargeting.js` |
+| `geoTargetMap.js` | Static lookup: GAM criteriaId → Kevel `CountryCode`/`Region` fields (219 countries + state-level for US, DE, NL, GB, CA, AU) |
+| `translateGeoTargeting.js` | Translates a raw exported `geoTargeting` node to Kevel-ready rule objects using `geoTargetMap.js` |
+| `translateGeoTargeting.test.js` | Unit tests for `translateGeoTargeting.js` |
 | `gamClient.js` | Shared GAM SOAP plumbing (auth, `soapCall`, paging) reused by the scripts below |
 | `fetchTargetingMaps.js` | Fetches GAM key/value name↔id maps via the GAM API |
 | `exportData.js` | Full raw export of core GAM entities for migration |
@@ -176,6 +179,38 @@ const zerkel = translateCustomTargeting(normalizeTargeting(rawNode), keys, value
 This has not been verified against a real Booking.com export — treat any such
 throw as a signal to extend the mapper rather than the normalizer.
 
+## Geo targeting
+
+GAM `Location` objects carry only a numeric `id` (criteriaId), a `type` string,
+a `canonicalParentId`, and a `displayName`. There are no country code or region
+code fields. `geoTargetMap.js` is a static lookup table (sourced from Google's
+geo targets CSV 2026-05-28, cross-referenced with the Kevel /v1/countries API)
+that maps criteriaIds to Kevel `CountryCode` and `Region` fields.
+
+`translateGeoTargeting.js` uses the map to translate a raw exported `geoTargeting`
+node into Kevel-ready rule objects:
+
+```js
+const { translateGeoTargeting } = require('./translateGeoTargeting');
+
+const { rules, unsupported } = translateGeoTargeting(
+  lineItem.targeting.geoTargeting
+);
+
+// rules: array of objects ready to POST to /v1/flight/{id}/geotargeting
+//        (caller adds FlightId before POSTing)
+// unsupported: locations not in the map (cities, postal codes, DMA regions, etc.)
+```
+
+**Coverage (v1):**
+- All 219 active countries
+- State/province-level regions for: US (51), DE (16), NL (12), GB (4), CA (13), AU (8)
+- Everything else (cities, postal codes, counties, DMA regions) → `unsupported` array
+
+**DMA regions (`DMA_REGION` type) are not supported.** GAM DMA criteriaIds are
+Nielsen-proprietary and absent from Google's public geo CSV. They will appear in
+the `unsupported` array.
+
 ## API
 
 ```js
@@ -253,6 +288,10 @@ Beyond boolean logic (which maps cleanly), watch for:
 5. **Export → mapper gap** — exported `lineItems.json` uses `@_type` as the
    discriminator, not `xsi_type`. Always pass `customTargeting` nodes through
    `normalizeTargeting()` before calling `translateCustomTargeting()`.
+6. **Geo targeting coverage** — `geoTargetMap.js` covers countries and
+   state-level regions for US, DE, NL, GB, CA, and AU. Other sub-country
+   regions, cities, postal codes, and DMA regions go to `unsupported` and
+   require manual handling or map expansion.
 
 ## Usage
 
@@ -262,6 +301,7 @@ npm install          # install deps (needed for fetchTargetingMaps.js)
 node gamZerkelMapper.js   # run the built-in mapper demo
 node --test               # run the test suite (Node 18+)
 node --test normalizeTargeting.test.js   # run normalize tests
+node --test translateGeoTargeting.test.js   # run geo targeting tests
 npm run fetch-maps        # fetch key/value maps from GAM (needs .env)
 npm run export            # full raw entity export to export/ (needs .env)
 ```
