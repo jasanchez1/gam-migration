@@ -131,5 +131,5 @@ test('N11: end-to-end wiring with translateCustomTargeting', () => {
   const values = { '10': 'shoes' };
   const normalized = normalizeTargeting(raw);
   const result = translateCustomTargeting(normalized, keys, values);
-  assert.strictEqual(result, '"category contains \\"shoes\\""');
+  assert.strictEqual(result.zerkel, '"category contains \\"shoes\\""');
 });

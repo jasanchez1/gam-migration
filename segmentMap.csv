@@ -1,0 +1,15 @@
+# GAM → Kevel segment mapping
+# Populated by: [account team]
+# Last updated: [date]
+# Format: gamSegmentId,kevelSegmentId,description
+gamSegmentId,kevelSegmentId,description
+12345,4560,Travel - Europe Intent
+12346,4561,Travel - Middle East Intent
+12347,4562,Propensity - EuropeTravelers
+12348,4563,LiveRamp TL1 MAID Interest Society Middle East
+12349,4564,LiveRamp TL1 Interest Society Middle East
+23456,7890,xExelate Travel Destination Europe
+23457,7891,xExelate Travel Destination Middle East
+23458,7892,xExelate Propensity Travel
+34567,9001,High Value Customers
+34568,9002,Frequent Travelers

@@ -49,6 +49,8 @@ Output:
 |---|---|
 | `gamZerkelMapper.js` | The mapper module + a runnable demo |
 | `gamZerkelMapper.test.js` | Unit tests (`node:test`, no dependencies) |
+| `segmentMap.csv` | Human-maintained GAM → Kevel segment ID translation table |
+| `segmentMap.js` | Loads `segmentMap.csv` into a `Map` at runtime |
 | `normalizeTargeting.js` | Renames `@_type` → `xsi_type` on exported GAM nodes so they can be fed into `gamZerkelMapper.js` |
 | `normalizeTargeting.test.js` | Unit tests for `normalizeTargeting.js` |
 | `geoTargetMap.js` | Static lookup: GAM criteriaId → Kevel `CountryCode`/`Region` fields (219 countries + state-level for US, DE, NL, GB, CA, AU) |
@@ -179,6 +181,40 @@ const zerkel = translateCustomTargeting(normalizeTargeting(rawNode), keys, value
 This has not been verified against a real Booking.com export — treat any such
 throw as a signal to extend the mapper rather than the normalizer.
 
+## Segment targeting
+
+GAM `AudienceSegmentCriteria` nodes cannot be translated automatically.
+Segment IDs are account-specific and require a human mapping exercise:
+Booking.com identifies which GAM segments correspond to which Kevel segments
+and populates `segmentMap.csv`.
+
+`segmentMap.js` loads that CSV at runtime and passes the resulting Map into
+`translateCustomTargeting` as the optional fourth argument:
+
+```js
+const { loadSegmentMap } = require('./segmentMap');
+const { translateCustomTargeting } = require('./gamZerkelMapper');
+const path = require('path');
+
+const segmentMap = loadSegmentMap(path.join(__dirname, 'segmentMap.csv'));
+const { zerkel, unsupported } = translateCustomTargeting(
+  normalizeTargeting(lineItem.targeting.customTargeting),
+  keys,
+  values,
+  segmentMap
+);
+
+// zerkel: full Zerkel string including any mapped segments
+// unsupported: segment nodes with IDs not found in segmentMap.csv
+```
+
+**If `segmentMap` is omitted or a segment ID is missing**, the segment node
+contributes nothing to the Zerkel output and is recorded in `unsupported`
+rather than throwing. The rest of the tree translates normally.
+
+**To populate `segmentMap.csv`:** copy the dummy file and fill in the real
+GAM and Kevel segment IDs. The `description` column is for reference only.
+
 ## Geo targeting
 
 GAM `Location` objects carry only a numeric `id` (criteriaId), a `type` string,
@@ -217,32 +253,38 @@ the `unsupported` array.
 const { translateCustomTargeting, collectIds } = require('./gamZerkelMapper');
 ```
 
-### `translateCustomTargeting(node, keys, values) → string`
+### `translateCustomTargeting(node, keys, values[, segmentMap]) → { zerkel, unsupported }`
 
 Recursively translates a GAM `customTargeting` node into a Kevel
-`CustomTargeting` string.
+`CustomTargeting` expression.
 
-- `node` — a GAM `CustomCriteriaSet` or `CustomCriteria` object
+- `node` — a GAM `CustomCriteriaSet`, `CustomCriteria`, or `AudienceSegmentCriteria` object
 - `keys` — map of `String(keyId)` → key name, e.g. `{ "101": "category" }`
 - `values` — map of `String(valueId)` → value, e.g. `{ "201": "mens_shoes" }`
+- `segmentMap` *(optional)* — `Map<number,number>` of GAM→Kevel segment IDs; unmapped segments go to `unsupported`
+
+Returns `{ zerkel, unsupported }` where `zerkel` is the Zerkel string (same
+format as before) and `unsupported` is an array of `AudienceSegmentCriteria`
+nodes whose IDs had no mapping.
 
 ```js
-translateCustomTargeting(
+const { zerkel, unsupported } = translateCustomTargeting(
   { xsi_type: 'CustomCriteria', keyId: 101, operator: 'IS', valueIds: [201] },
   { '101': 'category' },
   { '201': 'mens_shoes' }
 );
-// => "category contains \"mens_shoes\""
+// zerkel => "\"category contains \\\"mens_shoes\\\"\""
+// unsupported => []
 ```
 
-### `collectIds(node) → { keyIds, valueIds }`
+### `collectIds(node) → { keyIds, valueIds, segmentIds }`
 
-Walks the tree and returns every unique `keyId` and `valueId` (sorted). Use it
+Walks the tree and returns every unique `keyId`, `valueId`, and `segmentId` (sorted). Use it
 to batch your GAM `CustomTargetingService` lookups *before* translating.
 
 ```js
 collectIds(node);
-// => { keyIds: [101, 102, 103], valueIds: [201, 202, 301, 401] }
+// => { keyIds: [101, 102, 103], valueIds: [201, 202, 301, 401], segmentIds: [] }
 ```
 
 ## Translation rules
@@ -292,6 +334,11 @@ Beyond boolean logic (which maps cleanly), watch for:
    state-level regions for US, DE, NL, GB, CA, and AU. Other sub-country
    regions, cities, postal codes, and DMA regions go to `unsupported` and
    require manual handling or map expansion.
+7. **Segment targeting** — `AudienceSegmentCriteria` nodes require a manual
+   mapping in `segmentMap.csv`. Unmapped segments are skipped (not thrown)
+   and recorded in the `unsupported` array of the translation result.
+   The dummy `segmentMap.csv` must be replaced with real mappings before
+   running against production line items.
 
 ## Usage
 
@@ -301,6 +348,7 @@ npm install          # install deps (needed for fetchTargetingMaps.js)
 node gamZerkelMapper.js   # run the built-in mapper demo
 node --test               # run the test suite (Node 18+)
 node --test normalizeTargeting.test.js   # run normalize tests
+npm test                              # run all tests (mapper + normalize + geo)
 node --test translateGeoTargeting.test.js   # run geo targeting tests
 npm run fetch-maps        # fetch key/value maps from GAM (needs .env)
 npm run export            # full raw entity export to export/ (needs .env)
